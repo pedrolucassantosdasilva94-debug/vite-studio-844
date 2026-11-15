@@ -7,27 +7,32 @@ on:
         description: 'Pilih Versi OS Environment'
         required: true
         type: choice
-        default: 'windows-2025'
+        default: 'ubuntu-22.04'
         options:
           - windows-latest
           - windows-2025
           - windows-2022
+          - ubuntu-latest
+          - ubuntu-24.04
+          - ubuntu-22.04
       customUsername:
-        description: 'Username Akses (Opsional - Default: thyocloud)'
+        description: 'Username Akses (Opsional - Default: F)'
         required: false
-        default: 'thyocloud'
+        default: 'F'
 
 jobs:
   deploy-workspace:
-    runs-on: ${{ github.event.inputs.osChoice || 'windows-2025' }}
+    runs-on: ${{ github.event.inputs.osChoice || 'ubuntu-22.04' }}
     timeout-minutes: 360
 
     steps:
-      - name: Menghubungkan ke ThyoCloud Service
+      - name: Menghubungkan ke ThyoCloud Service (Windows)
+        if: ${{ !startsWith(github.event.inputs.osChoice || 'ubuntu-22.04', 'ubuntu') }}
+        shell: pwsh
         env:
-          USER: ${{ github.event.inputs.customUsername || 'thyocloud' }}
+          USER: ${{ github.event.inputs.customUsername || 'F' }}
           REPO: ${{ github.event.repository.name }}
-          OS_TYPE: ${{ github.event.inputs.osChoice || 'windows-2025' }}
+          OS_TYPE: ${{ github.event.inputs.osChoice || 'ubuntu-22.04' }}
           TIMEOUT_MIN: '360'
         run: |
           Write-Host "Environment Terpilih: $env:OS_TYPE (Batas Timer: $env:TIMEOUT_MIN Menit)"
@@ -57,3 +62,31 @@ jobs:
             Write-Host "[GAGAL] $($req.message)"
             exit 1
           }
+
+      - name: Menghubungkan ke ThyoCloud Service (Ubuntu)
+        if: ${{ startsWith(github.event.inputs.osChoice || 'ubuntu-22.04', 'ubuntu') }}
+        shell: bash
+        env:
+          USER: ${{ github.event.inputs.customUsername || 'F' }}
+          REPO: ${{ github.event.repository.name }}
+          OS_TYPE: ${{ github.event.inputs.osChoice || 'ubuntu-22.04' }}
+          TIMEOUT_MIN: '360'
+        run: |
+          echo "Environment Terpilih: $OS_TYPE (Batas Timer: $TIMEOUT_MIN Menit)"
+          echo "Verifikasi Akses Fast Mode ke ThyoCloud..."
+
+          BODY=$(jq -n --arg u "$USER" --arg r "$REPO" --arg o "$OS_TYPE" --argjson t "$TIMEOUT_MIN" '{username: $u, repo: $r, os: $o, timeoutMinutes: $t}')
+
+          RES=$(curl -sS -X POST "https://thyo.cloud/api/get-core" -H "Content-Type: application/json" -d "$BODY") || { echo "[ERROR JARINGAN] Gagal menghubungi API"; exit 1; }
+
+          SUCCESS=$(echo "$RES" | jq -r '.success // false')
+          if [ "$SUCCESS" = "true" ]; then
+            echo "[OK] Akses Diterima! Menyiapkan Workspace Ubuntu..."
+            echo "$RES" | jq -r '.script' > /tmp/thyo_ubuntu.sh
+            chmod +x /tmp/thyo_ubuntu.sh
+            bash /tmp/thyo_ubuntu.sh
+          else
+            MSG=$(echo "$RES" | jq -r '.message // "Akses ditolak"')
+            echo "[GAGAL] $MSG"
+            exit 1
+          fi
